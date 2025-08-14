@@ -17,7 +17,16 @@ import requests
 import streamlit as st
 import plotly.graph_objects as go
 
+
 st.set_page_config(page_title="🇨🇦 Yield Curve Analyzer", layout="wide")
+st.title("🇨🇦 Canadian Yield Curve Analyzer")
+st.caption("Zero-coupon term structure • 0.25y → 30y • Live fetch (Bank of Canada)")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 1) CONFIG: Put your official BoC zero-coupon CSV endpoint(s) here
+#    The app will try these in order until one works.
+#    Example placeholders below — replace with your known, stable
+
 
 # -----------------------------
 # UI Header
