@@ -40,6 +40,44 @@ TBILL_TARGETS = {
     "0.50Y": "6 month",
     "1Y":    "1 year",
 }
+VALET_GROUP_BASE = "https://www.bankofcanada.ca/valet/observations/group"
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_valet_group(group_name: str, start: str, end: str) -> tuple[pd.DataFrame, dict]:
+    """Fetch a Valet group (JSON) → wide DF + {series_id: label} map."""
+    url = f"{VALET_GROUP_BASE}/{group_name}/json"
+    params = {"start_date": start, "end_date": end}
+    r = requests.get(url, params=params, headers=HEADERS, timeout=25)
+    r.raise_for_status()
+    js = r.json()
+    obs = js.get("observations", [])
+    detail = js.get("seriesDetail", {})
+    if not obs or not detail:
+        return pd.DataFrame(), {}
+    dates = pd.to_datetime([o["d"] for o in obs])
+    data = {}
+    for sid in detail.keys():
+        vals = [float(o[sid]["v"]) if o.get(sid) and o[sid].get("v") not in (None, "") else np.nan for o in obs]
+        data[sid] = pd.Series(vals, index=dates, name=sid)
+    df = pd.DataFrame(data).sort_index()
+    labels = {sid: detail[sid].get("label", sid) for sid in detail}
+    return df, labels
+
+def pick_tbills_from_group(df: pd.DataFrame, labels: dict) -> pd.DataFrame:
+    """Select 3m, 6m, 12m T-bills by label (robust to series IDs)."""
+    want = {
+        "0.25Y": ["treasury bills", "3 month"],
+        "0.50Y": ["treasury bills", "6 month"],
+        "1Y":    ["treasury bills", "1 year", "12 month"],
+    }
+    out = {}
+    for curve_lbl, needles in want.items():
+        sid = next((sid for sid, lab in labels.items()
+                    if all(n in lab.lower() for n in needles)), None)
+        if sid in df.columns:
+            out[curve_lbl] = df[sid]
+    return pd.DataFrame(out)
+
 
 HEADERS = {
     # Some servers block default python UA; present as a browser
