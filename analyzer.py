@@ -1,87 +1,48 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
-import requests
-import plotly.graph_objects as go
+import plotly.express as px
 
-st.set_page_config(page_title="🇨🇦 Canada Yield Curve", layout="centered")
-st.title("🇨🇦 Canadian Government Bond Yield Curve")
-st.write("Live data from Bank of Canada Valet API")
+# ---- CONFIG ----
+st.set_page_config(page_title="Canadian Yield Curve (ETF Proxy)", layout="wide")
+st.title("🇨🇦 Canadian Yield Curve (ETF Proxies)")
 
-# Function to get all series metadata from BoC
-@st.cache_data
-def get_all_series():
-    url = "https://www.bankofcanada.ca/valet/lists/series/json"
-    r = requests.get(url)
-    r.raise_for_status()
-    return r.json()
-
-# Function to find series IDs for given keywords
-def find_series_ids(keywords):
-    series_data = get_all_series()
-    results = {}
-    for key, name in keywords.items():
-        for series_id, meta in series_data["seriesDetail"].items():
-            if all(word.lower() in meta["label"].lower() for word in name.split()):
-                results[key] = series_id
-                break
-    return results
-
-# Function to fetch latest yields
-@st.cache_data
-def fetch_latest_yields(series_ids):
-    yields = {}
-    for label, sid in series_ids.items():
-        url = f"https://www.bankofcanada.ca/valet/observations/{sid}/json"
-        r = requests.get(url)
-        r.raise_for_status()
-        data = r.json()
-        obs = data.get("observations", [])
-        if obs:
-            val = obs[-1][sid]["v"]
-            yields[label] = float(val)
-    return yields
-
-# Keywords to search in series list
-KEYWORDS = {
-    "1Y": "1-year benchmark bond yield",
-    "2Y": "2-year benchmark bond yield",
-    "5Y": "5-year benchmark bond yield",
-    "10Y": "10-year benchmark bond yield",
-    "30Y": "30-year benchmark bond yield"
+# ETF proxies for short, medium, and long-term bonds
+ETF_TICKERS = {
+    "1-3 Year": "ZFS.TO",
+    "3-7 Year": "ZFM.TO",
+    "10+ Year": "ZFL.TO"
 }
 
-try:
-    series_ids = find_series_ids(KEYWORDS)
-    st.write("Series IDs found:", series_ids)
+@st.cache_data
+def fetch_etf_yields():
+    yields = []
+    for term, ticker in ETF_TICKERS.items():
+        try:
+            etf = yf.Ticker(ticker)
+            info = etf.info
+            # 'yield' key is in decimal form, multiply by 100 for %
+            dist_yield = info.get("yield", None)
+            if dist_yield is not None:
+                yields.append({"Term": term, "Yield (%)": dist_yield * 100})
+            else:
+                yields.append({"Term": term, "Yield (%)": None})
+        except Exception as e:
+            yields.append({"Term": term, "Yield (%)": None})
+    return pd.DataFrame(yields)
 
-    if not series_ids:
-        st.error("Could not find any matching series IDs from BoC API.")
-    else:
-        yields = fetch_latest_yields(series_ids)
+# ---- FETCH DATA ----
+df = fetch_etf_yields()
 
-        if yields:
-            df = pd.DataFrame({
-                "Term": list(yields.keys()),
-                "Yield": list(yields.values())
-            })
+if df["Yield (%)"].isnull().all():
+    st.error("No yield data available right now. Please try again later.")
+else:
+    # Plot
+    fig = px.line(df, x="Term", y="Yield (%)", markers=True, title="Canadian Yield Curve (ETF Proxy)")
+    fig.update_layout(yaxis_title="Yield (%)", xaxis_title="Term to Maturity")
+    st.plotly_chart(fig, use_container_width=True)
 
-            st.subheader("Latest Yields (%)")
-            st.dataframe(df)
+    # Show table
+    st.subheader("Yield Data")
+    st.dataframe(df)
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df["Term"], y=df["Yield"], mode='lines+markers',
-                name="Yield Curve"
-            ))
-            fig.update_layout(
-                title="Canadian Government Bond Yield Curve",
-                xaxis_title="Term to Maturity",
-                yaxis_title="Yield (%)",
-                template="plotly_dark"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.error("No yield data returned from Bank of Canada API.")
-
-except requests.exceptions.RequestException as e:
-    st.error(f"Error fetching data: {e}")
