@@ -1,11 +1,11 @@
 # app.py
-# 🇨🇦 Canadian Yield Curve Analyzer — Live via Bank of Canada Valet
-# - Short end: T-bills (3m, 6m, 12m) from Valet *group* "tbill_tuesday"
-# - Long end: GoC benchmark bonds (2Y,3Y,5Y,7Y,10Y,30Y) from Valet *series*
+# 🇨🇦 Canadian Yield Curve Analyzer — Bank of Canada (Valet groups)
+# - Short end: money_market group (Treasury bills 3m, 6m, 12m)
+# - Long end: bond_yields_benchmark group (2Y, 3Y, 5Y, 7Y, 10Y, 30Y)
 # - Compare two dates or two rolling windows; charts + diagnostics + insights
 
 import datetime as dt
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -13,64 +13,37 @@ import requests
 import streamlit as st
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="🇨🇦 Yield Curve (Live)", layout="wide")
-st.title("🇨🇦 Canadian Yield Curve Analyzer (Live via BoC Valet)")
-st.caption("Short end: weekly T-bills (Valet group). Long end: benchmark bonds (Valet series).")
+st.set_page_config(page_title="🇨🇦 Yield Curve (Bank of Canada)", layout="wide")
+st.title("🇨🇦 Canadian Yield Curve — Bank of Canada (Valet)")
+st.caption("Short end: Money market (T-bills). Long end: Benchmark bonds. Data fetched live from BoC Valet.")
 
-# -----------------------------
-# Config
-# -----------------------------
+VALET_GROUP_BASE = "https://www.bankofcanada.ca/valet/observations/group"
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/json, text/plain, */*",
     "Connection": "keep-alive",
 }
 
-# Benchmark bond series (par yields, %)
-BOND_SERIES: Dict[str, str] = {
-    "2Y":  "BD.CDN.2YR.DQ.YLD",
-    "3Y":  "BD.CDN.3YR.DQ.YLD",
-    "5Y":  "BD.CDN.5YR.DQ.YLD",
-    "7Y":  "BD.CDN.7YR.DQ.YLD",
-    "10Y": "BD.CDN.10YR.DQ.YLD",
-    "15Y": "BD.CDN.15YR.DQ.YLD",
-    "20Y": "BD.CDN.20YR.DQ.YLD",
-    "25Y": "BD.CDN.25YR.DQ.YLD",
-    "30Y": "BD.CDN.LONG.DQ.YLD",
+# Which labels to select from each group (match is case-insensitive & ANDed)
+TBILL_WANTS = {
+    "0.25Y": ["treasury bills", "3 month"],
+    "0.50Y": ["treasury bills", "6 month"],
+    "1Y":    ["treasury bills", "1 year"],   # also matches “12 month” text
+    # If 1-month exists and you want it, add:
+    # "0.08Y": ["treasury bills", "1 month"]
 }
-
-VALET_OBS_BASE = "https://www.bankofcanada.ca/valet/observations"
-VALET_GROUP_BASE = "https://www.bankofcanada.ca/valet/observations/group"
-
-# -----------------------------
-# Fetchers
-# -----------------------------
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_valet_series(series_codes: List[str], start: str, end: str) -> pd.DataFrame:
-    """Fetch multiple Valet series (JSON) -> wide DF indexed by date. Columns = series codes."""
-    frames = []
-    for code in series_codes:
-        url = f"{VALET_OBS_BASE}/{code}/json"
-        params = {"start_date": start, "end_date": end}
-        try:
-            r = requests.get(url, params=params, headers=HEADERS, timeout=25)
-            r.raise_for_status()
-            js = r.json()
-            obs = js.get("observations", [])
-            if not obs:
-                continue
-            dates = pd.to_datetime([o["d"] for o in obs])
-            vals = [float(o[code]["v"]) if o.get(code) and o[code].get("v") not in (None, "") else np.nan for o in obs]
-            frames.append(pd.Series(vals, index=dates, name=code))
-        except Exception:
-            continue
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, axis=1).sort_index()
+BENCH_WANTS = {
+    "2Y":   ["benchmark bond yields", "2 year"],
+    "3Y":   ["benchmark bond yields", "3 year"],
+    "5Y":   ["benchmark bond yields", "5 year"],
+    "7Y":   ["benchmark bond yields", "7 year"],
+    "10Y":  ["benchmark bond yields", "10 year"],
+    "30Y":  ["benchmark bond yields", "long-term"],
+}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_valet_group(group_name: str, start: str, end: str) -> Tuple[pd.DataFrame, Dict[str, str]]:
-    """Fetch a Valet *group* (JSON) -> wide DF + {series_id: label}."""
+    """Fetch a BoC Valet *group* → (wide DF, {series_id: label})."""
     url = f"{VALET_GROUP_BASE}/{group_name}/json"
     params = {"start_date": start, "end_date": end}
     r = requests.get(url, params=params, headers=HEADERS, timeout=25)
@@ -80,6 +53,7 @@ def fetch_valet_group(group_name: str, start: str, end: str) -> Tuple[pd.DataFra
     detail = js.get("seriesDetail", {})
     if not obs or not detail:
         return pd.DataFrame(), {}
+
     dates = pd.to_datetime([o["d"] for o in obs])
     data = {}
     for sid in detail.keys():
@@ -89,49 +63,42 @@ def fetch_valet_group(group_name: str, start: str, end: str) -> Tuple[pd.DataFra
     labels = {sid: detail[sid].get("label", sid) for sid in detail}
     return df, labels
 
-def pick_tbills_from_group(df: pd.DataFrame, labels: Dict[str, str]) -> pd.DataFrame:
-    """
-    Select 3m, 6m, 12m T-bills by label (robust to ID changes).
-    We search labels case-insensitively for the maturity phrases.
-    """
+def select_by_label(df: pd.DataFrame, labels: Dict[str, str], wants: Dict[str, list]) -> pd.DataFrame:
+    """Pick columns whose label contains ALL tokens in wants (case-insensitive)."""
     if df.empty or not labels:
         return pd.DataFrame()
-    want = {
-        "0.25Y": ["treasury bills", "3 month"],
-        "0.50Y": ["treasury bills", "6 month"],
-        "1Y":    ["treasury bills", "1 year"],  # also covers 12 month wordings
-    }
+    labels_lc = {sid: lab.lower() for sid, lab in labels.items()}
     out = {}
-    lab_lc = {sid: lab.lower() for sid, lab in labels.items()}
-    for curve_lbl, needles in want.items():
-        sid = next((sid for sid, lab in lab_lc.items() if all(n in lab for n in needles)), None)
+    for curve_label, tokens in wants.items():
+        sid = next((sid for sid, lab in labels_lc.items() if all(tok in lab for tok in tokens)), None)
         if sid and sid in df.columns:
-            out[curve_lbl] = df[sid]
+            out[curve_label] = df[sid]
     return pd.DataFrame(out)
 
 # -----------------------------
-# Load data window
+# Load window (last ~3 years)
 # -----------------------------
 today = dt.date.today()
 start_default = (today - dt.timedelta(days=3*365)).isoformat()
 end_default = today.isoformat()
 
+with st.spinner("Fetching money market (T-bills)…"):
+    mm_df, mm_labels = fetch_valet_group("money_market", start_default, end_default)
+tbills = select_by_label(mm_df, mm_labels, TBILL_WANTS)  # may be empty if data not present today
+
 with st.spinner("Fetching benchmark bonds…"):
-    bonds_df = fetch_valet_series(list(BOND_SERIES.values()), start_default, end_default)
-if bonds_df.empty:
-    st.error("No benchmark bond data available right now. Please retry later.")
+    bench_df, bench_labels = fetch_valet_group("bond_yields_benchmark", start_default, end_default)
+bench = select_by_label(bench_df, bench_labels, BENCH_WANTS)
+
+if tbills.empty and bench.empty:
+    st.error("No data returned from Bank of Canada Valet (groups). Please try again later.")
     st.stop()
-bonds_df = bonds_df.rename(columns={v: k for k, v in BOND_SERIES.items()})
 
-with st.spinner("Fetching T-bills (weekly)…"):
-    tb_group_df, tb_labels = fetch_valet_group("tbill_tuesday", start_default, end_default)
-tbills_df = pick_tbills_from_group(tb_group_df, tb_labels)  # may be empty if not present
-
-# Merge short + long
-df_raw = pd.concat([tbills_df, bonds_df], axis=1).sort_index().dropna(how="all")
+# Merge into a single curve (short + long)
+df_raw = pd.concat([tbills, bench], axis=1).sort_index().dropna(how="all")
 if df_raw.empty:
-    # fall back to bonds only
-    df_raw = bonds_df.copy()
+    # Fall back to whichever side has data
+    df_raw = bench if not bench.empty else tbills
 
 # -----------------------------
 # Controls
@@ -141,7 +108,7 @@ mode = st.sidebar.radio("Compare", ["Two specific dates", "Two windows (averages
 
 min_date, max_date = df_raw.index.min().date(), df_raw.index.max().date()
 
-def nearest_row(df: pd.DataFrame, d: dt.date) -> Tuple[pd.Series, str]:
+def nearest_row(df: pd.DataFrame, d: dt.date):
     idx = df.index.get_indexer([pd.Timestamp(d)], method="nearest")[0]
     return df.iloc[idx], df.index[idx].date().isoformat()
 
@@ -161,10 +128,9 @@ else:
     labelA, labelB = f"{startA}→{endA}", f"{startB}→{endB}"
 
 # -----------------------------
-# Prepare plotting arrays
+# Prep for plotting
 # -----------------------------
-def term_to_years(lbl: str) -> float:
-    # labels like "0.25Y", "1Y", "2Y", etc.
+def label_to_years(lbl: str) -> float:
     try:
         if lbl.endswith("Y"):
             return float(lbl[:-1])
@@ -173,7 +139,7 @@ def term_to_years(lbl: str) -> float:
     return np.nan
 
 cols = [c for c in df_raw.columns if c in curveA.index and c in curveB.index]
-terms = np.array([term_to_years(c) for c in cols], dtype=float)
+terms = np.array([label_to_years(c) for c in cols], dtype=float)
 mask = ~np.isnan(terms)
 terms = terms[mask]
 yA = np.array([curveA[c] for c in np.array(cols)[mask]], dtype=float)
@@ -183,7 +149,7 @@ order = np.argsort(terms)
 x_terms, yA, yB = terms[order], yA[order], yB[order]
 
 if len(x_terms) < 3:
-    st.error("Not enough points to draw the curve (need ≥ 3 maturities). Try different dates/windows.")
+    st.error("Not enough maturities to draw the curve (need ≥ 3). Try different dates/windows.")
     st.stop()
 
 # -----------------------------
@@ -193,7 +159,7 @@ fig = go.Figure()
 fig.add_trace(go.Scatter(x=x_terms, y=yA, mode="lines+markers", name=f"Curve A ({labelA})"))
 fig.add_trace(go.Scatter(x=x_terms, y=yB, mode="lines+markers", name=f"Curve B ({labelB})"))
 fig.update_layout(
-    title="Yield Curve (T-bills + Benchmarks), %",
+    title="Yield Curve (Money market + Benchmark bonds), %",
     xaxis_title="Maturity (years)",
     yaxis_title="Yield (%)",
     template="plotly_white",
@@ -218,14 +184,14 @@ st.plotly_chart(fig2, use_container_width=True)
 def interp(x, y, t):
     return float(np.interp(t, x, y))
 
-def safe_interp(t):
+def safe_pair(t):
     try:
         return interp(x_terms, yA, t), interp(x_terms, yB, t)
     except Exception:
         return np.nan, np.nan
 
-a2, b2 = safe_interp(2.0)
-a10, b10 = safe_interp(10.0)
+a2, b2 = safe_pair(2.0)
+a10, b10 = safe_pair(10.0)
 slopeA = (a10 - a2) if np.isfinite(a2) and np.isfinite(a10) else np.nan
 slopeB = (b10 - b2) if np.isfinite(b2) and np.isfinite(b10) else np.nan
 slope_change = (slopeB - slopeA) if np.isfinite(slopeA) and np.isfinite(slopeB) else np.nan
@@ -254,7 +220,7 @@ def insights(slope_change, a2, b2, a10, b10):
     msgs = []
     if np.isfinite(slope_change):
         if slope_change > 0.10:
-            msgs.append("**Steepening:** Long end rose vs short; markets may be pricing stronger growth/inflation or slower policy easing.")
+            msgs.append("**Steepening:** Long end rose vs short; markets may be pricing stronger growth/inflation or slower easing.")
         elif slope_change < -0.10:
             msgs.append("**Flattening/Inversion:** Short end rose vs long (or fell less), pointing to tighter near-term policy or growth concerns.")
         else:
@@ -270,12 +236,13 @@ def insights(slope_change, a2, b2, a10, b10):
         else:
             msgs.append("**Mixed moves:** Watch credit spreads and issuance windows.")
     else:
-        msgs.append("Directional move insight limited (missing 2Y/10Y points).")
+        msgs.append("Directional insight limited (missing 2Y/10Y).")
     return "\n".join(f"- {m}" for m in msgs)
 
 st.subheader("🧠 Auto-Insights")
 st.markdown(insights(slope_change, a2, b2, a10, b10))
 
-st.caption("Sources: Bank of Canada Valet — group ‘tbill_tuesday’ (T-bills) and benchmark bond yield series.")
+st.caption("Sources: Bank of Canada — Money market yields & Selected benchmark bond yields (JSON via Valet groups).")
+
 
 
