@@ -34,7 +34,7 @@ def fetch_yields():
     return pd.DataFrame(data)
 
 
-df = fetch_yields().dropna(how="all")
+df = fetch_yields().dropna()
 
 # Sidebar
 min_date = df.index.min().date()
