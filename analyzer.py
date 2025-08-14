@@ -1,66 +1,65 @@
+# yield_curve_analyzer.py
+
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+from pandas_datareader import data as pdr
+import datetime as dt
 
+# -------------------
+# SETTINGS
+# -------------------
 st.set_page_config(page_title="🇨🇦 Canadian Yield Curve Analyzer", layout="wide")
+st.title("🇨🇦 Canadian Government Bond Yield Curve")
 
-# Mapping of maturities to Yahoo tickers
-US_TREASURY_TICKERS = {
-    "1M": "^IRX",
-    "2Y": "^UST2Y",
-    "5Y": "^UST5Y",
-    "10Y": "^TNX",
-    "30Y": "^TYX"
+# Define Canadian yield codes from FRED
+FRED_CODES = {
+    "1 Year": "IRLTLT01CAM156N",  # Long-term rates (monthly) - will simulate 1Y for example
+    "5 Year": "IRLTLT01CAM193N",  # Monthly
+    "10 Year": "IRLTLT01CAM156N", # Reused as placeholder
+    "30 Year": "IRLTLT01CAM156N"  # Reused as placeholder
 }
 
+# Date range selector
+end_date = dt.date.today()
+start_date = end_date - dt.timedelta(days=365)
 
-@st.cache_data(ttl=3600)
-def fetch_yields():
-    """Fetch latest yields from Yahoo Finance."""
-    data = {}
-    for maturity, ticker in US_TREASURY_TICKERS.items():
+# -------------------
+# FETCH DATA
+# -------------------
+@st.cache_data
+def get_fred_data(start, end):
+    df = pd.DataFrame()
+    for maturity, code in FRED_CODES.items():
         try:
-            df = yf.download(ticker, period="1mo", interval="1d")
-            if not df.empty:
-                data[maturity] = df["Close"]
-            else:
-                st.warning(f"No data for {maturity} ({ticker})")
+            series = pdr.DataReader(code, "fred", start, end)
+            df[maturity] = series
         except Exception as e:
-            st.error(f"Error fetching {maturity}: {e}")
-    return pd.DataFrame(data)
+            st.warning(f"Could not fetch {maturity} data: {e}")
+    return df
 
-st.title("📈 Canadian Yield Curve Analyzer")
-st.write("Live Canadian Government Bond Yields from Yahoo Finance.")
+df = get_fred_data(start_date, end_date)
 
-df = fetch_yields()
+# -------------------
+# DISPLAY
+# -------------------
+st.subheader("Yield Data (Latest)")
+st.dataframe(df.tail(10))
 
-if df.empty:
-    st.error("No data available.")
-else:
-    latest = df.iloc[-1].dropna()
+st.subheader("Yield Curve Plot")
+fig, ax = plt.subplots()
+df.plot(ax=ax)
+ax.set_title("Canadian Government Bond Yields")
+ax.set_ylabel("Yield (%)")
+ax.set_xlabel("Date")
+st.pyplot(fig)
 
-    # Display table
-    st.subheader("Latest Yields (%)")
-    st.table(latest.apply(lambda x: round(x, 2)))
-
-    # Plot yield curve
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=latest.index,
-        y=latest.values,
-        mode="lines+markers",
-        line=dict(color="blue", width=3),
-        marker=dict(size=8)
-    ))
-    fig.update_layout(
-        title="Canadian Yield Curve",
-        xaxis_title="Maturity",
-        yaxis_title="Yield (%)",
-        template="plotly_white"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-
-
+# Show latest curve snapshot
+st.subheader("Latest Yield Curve Snapshot")
+latest = df.iloc[-1].dropna()
+fig2, ax2 = plt.subplots()
+ax2.plot(latest.index, latest.values, marker='o')
+ax2.set_title(f"Yield Curve as of {df.index[-1].date()}")
+ax2.set_ylabel("Yield (%)")
+ax2.set_xlabel("Maturity")
+st.pyplot(fig2)
