@@ -6,13 +6,14 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="🇨🇦 Canadian Yield Curve Analyzer", layout="wide")
 
 # Mapping of maturities to Yahoo tickers
-CANADA_BOND_TICKERS = {
-    "1 Year": "^IRX",  # Using US 13-week as proxy if Canada not available
-    "2 Year": "^CANT2Y",
-    "5 Year": "^CANT5Y",
-    "10 Year": "^CANT10Y",
-    "30 Year": "^CANT30Y"
+US_TREASURY_TICKERS = {
+    "1M": "^IRX",
+    "2Y": "^UST2Y",
+    "5Y": "^UST5Y",
+    "10Y": "^TNX",
+    "30Y": "^TYX"
 }
+
 
 @st.cache_data(ttl=3600)
 def fetch_yields():
