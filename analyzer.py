@@ -4,7 +4,26 @@ import plotly.graph_objects as go
 from fredapi import Fred
 
 # ====== API Keys ======
-fred = Fred(api_key="YOUR_FRED_API_KEY")
+
+import os
+from fredapi import Fred
+
+FRED_KEY = os.getenv("FRED_API_KEY")
+
+def fred_client() -> Fred | None:
+    if not FRED_KEY:
+        return None
+    try:
+        fred = Fred(api_key=FRED_KEY)
+        # Lightweight ping to fail fast if key is bad
+        _ = fred.get_series('DGS10', observation_start='2024-01-01')
+        return fred
+    except Exception as e:
+        print(f"[FRED init error] {e}")  # you’ll see the exact API message
+        return None
+
+fred = fred_client()
+
 
 # ====== 1. Yield Curve Example (US) ======
 ten_year = fred.get_series('DGS10')  # 10-year Treasury
