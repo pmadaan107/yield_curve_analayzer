@@ -7,9 +7,8 @@
 # - Fallback: upload BoC zero-coupon CSV and analyze
 # ---------------------------------------------------
 
+
 import io
-import json
-import math
 import datetime as dt
 import pandas as pd
 import numpy as np
@@ -17,16 +16,55 @@ import requests
 import streamlit as st
 import plotly.graph_objects as go
 
-
-st.set_page_config(page_title="🇨🇦 Yield Curve Analyzer", layout="wide")
+st.set_page_config(page_title="Canadian Yield Curve Analyzer", layout="wide")
 st.title("🇨🇦 Canadian Yield Curve Analyzer")
-st.caption("Zero-coupon term structure • 0.25y → 30y • Live fetch (Bank of Canada)")
+st.caption("Zero-coupon term structure • 0.25 y → 30 y • Source: Bank of Canada (live)")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 1) CONFIG: Put your official BoC zero-coupon CSV endpoint(s) here
-#    The app will try these in order until one works.
-#    Example placeholders below — replace with your known, stable
+# URL for BoC zero-coupon curves CSV
+CSV_URL = "https://www.bankofcanada.ca/valet/observations/group/zero_coupon_curves/csv"
 
+@st.cache_data(ttl=3600)
+def fetch_zero_coupon():
+    try:
+        resp = requests.get(CSV_URL, timeout=20)
+        resp.raise_for_status()
+        df = pd.read_csv(io.BytesIO(resp.content))
+        df.columns = [c.strip() for c in df.columns]
+        date_col = next((c for c in df.columns if "date" in c.lower()), df.columns[0])
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.set_index(date_col).sort_index()
+        term_cols = [c for c in df.columns if _is_float(c)]
+        df = df[term_cols]
+        med = np.nanmedian(df.values.astype(float))
+        if med < 1:
+            df *= 100.0
+        df.columns = [f"{float(c):.2f}y" for c in df.columns]
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame()
+
+def _is_float(s):
+    try:
+        float(s)
+        return True
+    except:
+        return False
+
+df = fetch_zero_coupon()
+if df.empty:
+    st.stop()
+
+dates = df.index
+min_date, max_date = dates.min().date(), dates.max().date()
+
+st.sidebar.header("Controls")
+mode = st.sidebar.radio("Compare", ["Two dates", "Window averages"], index=0)
+
+# [— Insert rest of comparison logic, plotting, diagnostics, and insights here —]
+
+# Reminder: We’ve removed upload/download functionality.
+# Code should continue with plotting and insights as before.
 
 # -----------------------------
 # UI Header
