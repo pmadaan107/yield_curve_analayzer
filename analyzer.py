@@ -1,65 +1,79 @@
-# yield_curve_analyzer.py
-
 import streamlit as st
 import pandas as pd
+import requests
 import matplotlib.pyplot as plt
-from pandas_datareader import data as pdr
-import datetime as dt
 
-# -------------------
-# SETTINGS
-# -------------------
-st.set_page_config(page_title="🇨🇦 Canadian Yield Curve Analyzer", layout="wide")
-st.title("🇨🇦 Canadian Government Bond Yield Curve")
-
-# Define Canadian yield codes from FRED
-FRED_CODES = {
-    "1 Year": "IRLTLT01CAM156N",  # Long-term rates (monthly) - will simulate 1Y for example
-    "5 Year": "IRLTLT01CAM193N",  # Monthly
-    "10 Year": "IRLTLT01CAM156N", # Reused as placeholder
-    "30 Year": "IRLTLT01CAM156N"  # Reused as placeholder
+# =========================
+# CONFIG
+# =========================
+FRED_API_KEY = "YOUR_FRED_API_KEY"  # Get it free from https://fred.stlouisfed.org/
+CANADA_YIELD_SERIES = {
+    "1Y": "IRLTLT01CAM156N",  # Canada 1-Year Government Bond Yield
+    "2Y": "IRLTLT02CAM156N",  # Canada 2-Year
+    "5Y": "IRLTLT05CAM156N",  # Canada 5-Year
+    "10Y": "IRLTLT10CAM156N", # Canada 10-Year
+    "30Y": "IRLTLT30CAM156N"  # Canada 30-Year
 }
 
-# Date range selector
-end_date = dt.date.today()
-start_date = end_date - dt.timedelta(days=365)
-
-# -------------------
-# FETCH DATA
-# -------------------
+# =========================
+# FUNCTIONS
+# =========================
 @st.cache_data
-def get_fred_data(start, end):
-    df = pd.DataFrame()
-    for maturity, code in FRED_CODES.items():
-        try:
-            series = pdr.DataReader(code, "fred", start, end)
-            df[maturity] = series
-        except Exception as e:
-            st.warning(f"Could not fetch {maturity} data: {e}")
+def fetch_fred_data(series_id):
+    """Fetch a single FRED series as a DataFrame."""
+    url = "https://api.stlouisfed.org/fred/series/observations"
+    params = {
+        "series_id": series_id,
+        "api_key": FRED_API_KEY,
+        "file_type": "json"
+    }
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    data = r.json().get("observations", [])
+    df = pd.DataFrame(data)[["date", "value"]]
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"])
     return df
 
-df = get_fred_data(start_date, end_date)
+def get_latest_yields():
+    """Get the latest yield for each maturity."""
+    latest_data = {}
+    for label, series in CANADA_YIELD_SERIES.items():
+        df = fetch_fred_data(series)
+        latest_row = df.dropna().iloc[-1]
+        latest_data[label] = latest_row["value"]
+    return latest_data
 
-# -------------------
-# DISPLAY
-# -------------------
-st.subheader("Yield Data (Latest)")
-st.dataframe(df.tail(10))
+# =========================
+# STREAMLIT UI
+# =========================
+st.set_page_config(page_title="🇨🇦 Canada Yield Curve Analyzer", layout="wide")
+st.title("🇨🇦 Canada Yield Curve Analyzer")
 
-st.subheader("Yield Curve Plot")
-fig, ax = plt.subplots()
-df.plot(ax=ax)
-ax.set_title("Canadian Government Bond Yields")
-ax.set_ylabel("Yield (%)")
-ax.set_xlabel("Date")
-st.pyplot(fig)
+st.markdown("""
+This app fetches **Canadian Government Bond Yields** directly from the FRED API and plots the yield curve.
+Data source: [FRED](https://fred.stlouisfed.org/)  
+""")
 
-# Show latest curve snapshot
-st.subheader("Latest Yield Curve Snapshot")
-latest = df.iloc[-1].dropna()
-fig2, ax2 = plt.subplots()
-ax2.plot(latest.index, latest.values, marker='o')
-ax2.set_title(f"Yield Curve as of {df.index[-1].date()}")
-ax2.set_ylabel("Yield (%)")
-ax2.set_xlabel("Maturity")
-st.pyplot(fig2)
+try:
+    latest_yields = get_latest_yields()
+    st.subheader("📊 Latest Yields (%)")
+    st.write(pd.DataFrame(latest_yields, index=["Yield (%)"]).T)
+
+    # Plot yield curve
+    fig, ax = plt.subplots()
+    maturities = list(latest_yields.keys())
+    yields = list(latest_yields.values())
+    ax.plot(maturities, yields, marker="o", linestyle="-", color="b")
+    ax.set_title("Canada Yield Curve")
+    ax.set_xlabel("Maturity")
+    ax.set_ylabel("Yield (%)")
+    ax.grid(True)
+
+    st.pyplot(fig)
+
+except requests.exceptions.RequestException as e:
+    st.error(f"Error fetching data: {e}")
+except Exception as e:
+    st.error(f"Unexpected error: {e}")
+
