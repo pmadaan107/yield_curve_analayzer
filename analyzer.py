@@ -21,15 +21,26 @@ st.caption("Government of Canada benchmark (par) yields — Source: Bank of Cana
 # Valet API series codes for benchmark/par GoC yields (percent)
 # (These are the correct Valet symbols; do NOT use V12xxxx with Valet.)
 # -------------------------------------------------------------------
-SERIES: Dict[str, str] = {
-    "1Y":  "BD.CDN.1YR.DQ.YLD",
+# Treasury bill yields (short end)
+T_BILL_SERIES = {
+    "0.08Y": "V39057",  # 1-month average yield (%)
+    "0.25Y": "V39058",  # 3-month
+    "0.50Y": "V39060",  # 6-month
+}
+
+# Benchmark bond yields (longer maturities)
+BOND_SERIES = {
     "2Y":  "BD.CDN.2YR.DQ.YLD",
     "3Y":  "BD.CDN.3YR.DQ.YLD",
     "5Y":  "BD.CDN.5YR.DQ.YLD",
     "7Y":  "BD.CDN.7YR.DQ.YLD",
     "10Y": "BD.CDN.10YR.DQ.YLD",
-    "30Y": "BD.CDN.LONG.DQ.YLD",  # long benchmark (~30Y)
+    "30Y": "BD.CDN.LONG.DQ.YLD",
 }
+
+# Merge both
+SERIES = {**T_BILL_SERIES, **BOND_SERIES}
+
 
 BASE_URL = "https://www.bankofcanada.ca/valet/observations"
 
@@ -116,7 +127,7 @@ else:
     labelB = f"{startB}→{endB}"
 
 # Ensure standard term order for plotting/interp
-ordered_terms = [1, 2, 3, 5, 7, 10, 30]
+ordered_terms = [0.08, 0.25, 0.5, 1, 2, 3, 5, 7, 10, 30]
 x_terms = []
 yA = []
 yB = []
