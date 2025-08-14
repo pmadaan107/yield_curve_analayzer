@@ -1,55 +1,68 @@
-# yield_curve_investing.py
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import investpy
+import requests
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="🇨🇦 Canada Yield Curve Analyzer", layout="wide")
+st.set_page_config(page_title="🇨🇦 Canada Yield Curve", layout="centered")
 
-# Define maturities and investing.com search names
-BOND_SEARCH = {
-    "1-Year": "Canada 1-Year",
-    "2-Year": "Canada 2-Year",
-    "5-Year": "Canada 5-Year",
-    "10-Year": "Canada 10-Year",
-    "30-Year": "Canada 30-Year"
+st.title("🇨🇦 Canadian Government Bond Yield Curve")
+st.write("Live data from Bank of Canada Valet API")
+
+# Bank of Canada Valet API series IDs
+SERIES = {
+    "1Y": "V39055",
+    "2Y": "V39056",
+    "5Y": "V39057",
+    "10Y": "V39058",
+    "30Y": "V39062"
 }
 
 @st.cache_data
-def fetch_investing_yields():
+def fetch_latest_yields():
     yields = {}
-    for label, search_name in BOND_SEARCH.items():
-        try:
-            df = investpy.get_bond_historical_data(
-                bond=search_name,
-                from_date="01/01/2024",
-                to_date=pd.Timestamp.today().strftime("%d/%m/%Y")
-            )
-            latest_value = df["Close"].iloc[-1]
-            yields[label] = latest_value
-        except Exception as e:
-            yields[label] = None
+    for label, sid in SERIES.items():
+        url = f"https://www.bankofcanada.ca/valet/observations/{sid}/json"
+        r = requests.get(url)
+        r.raise_for_status()
+        data = r.json()
+        obs = data.get("observations", [])
+        if obs:
+            # Get latest observation
+            latest = obs[-1]
+            val = latest[sid]["v"]
+            yields[label] = float(val)
     return yields
 
-yields = fetch_investing_yields()
+try:
+    yields = fetch_latest_yields()
 
-st.title("🇨🇦 Canada Government Bond Yield Curve")
-st.write("Data source: Investing.com via `investpy`")
+    if yields:
+        # Create dataframe
+        df = pd.DataFrame({
+            "Term": list(yields.keys()),
+            "Yield": list(yields.values())
+        })
 
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("Latest Yields")
-    st.dataframe(pd.DataFrame.from_dict(yields, orient="index", columns=["Yield (%)"]))
+        st.subheader("Latest Yields (%)")
+        st.dataframe(df)
 
-with col2:
-    st.subheader("Yield Curve")
-    fig, ax = plt.subplots()
-    labels = list(yields.keys())
-    values = [yields[k] for k in labels]
-    ax.plot(labels, values, marker="o")
-    ax.set_xlabel("Maturity")
-    ax.set_ylabel("Yield (%)")
-    ax.set_title("Canada Yield Curve")
-    ax.grid(True)
-    st.pyplot(fig)
+        # Plot yield curve
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df["Term"], y=df["Yield"], mode='lines+markers',
+            name="Yield Curve"
+        ))
+        fig.update_layout(
+            title="Canadian Government Bond Yield Curve",
+            xaxis_title="Term to Maturity",
+            yaxis_title="Yield (%)",
+            template="plotly_dark"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error("No yield data returned from Bank of Canada API.")
+
+except requests.exceptions.RequestException as e:
+    st.error(f"Error fetching data: {e}")
+
 
