@@ -1,48 +1,59 @@
+# yield_curve_canada.py
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import requests
 import plotly.express as px
 
-# ---- CONFIG ----
-st.set_page_config(page_title="Canadian Yield Curve (ETF Proxy)", layout="wide")
-st.title("🇨🇦 Canadian Yield Curve (ETF Proxies)")
+st.set_page_config(page_title="Canadian Yield Curve", layout="wide")
+st.title("🇨🇦 Canadian Government Bond Yield Curve")
 
-# ETF proxies for short, medium, and long-term bonds
-ETF_TICKERS = {
-    "1-3 Year": "ZFS.TO",
-    "3-7 Year": "ZFM.TO",
-    "10+ Year": "ZFL.TO"
+# Bank of Canada Valet Series IDs
+BOND_SERIES = {
+    "1 Year": "V80691343",
+    "2 Year": "V80691366",
+    "5 Year": "V80691390",
+    "10 Year": "V80691414",
+    "30 Year": "V80691438"
 }
 
-@st.cache_data
-def fetch_etf_yields():
-    yields = []
-    for term, ticker in ETF_TICKERS.items():
-        try:
-            etf = yf.Ticker(ticker)
-            info = etf.info
-            # 'yield' key is in decimal form, multiply by 100 for %
-            dist_yield = info.get("yield", None)
-            if dist_yield is not None:
-                yields.append({"Term": term, "Yield (%)": dist_yield * 100})
-            else:
-                yields.append({"Term": term, "Yield (%)": None})
-        except Exception as e:
-            yields.append({"Term": term, "Yield (%)": None})
-    return pd.DataFrame(yields)
+def fetch_boc_series(series_id):
+    """Fetch latest yield data for a given BoC Valet series."""
+    url = f"https://www.bankofcanada.ca/valet/observations/{series_id}/json"
+    r = requests.get(url)
+    r.raise_for_status()
+    data = r.json()
+    obs = pd.DataFrame(data["observations"])
+    obs["date"] = pd.to_datetime(obs["d"])
+    obs[series_id] = pd.to_numeric(obs[series_id].apply(lambda x: x.get("v", None)), errors="coerce")
+    return obs[["date", series_id]]
 
-# ---- FETCH DATA ----
-df = fetch_etf_yields()
+# Fetch latest yields
+yields = {}
+latest_date = None
 
-if df["Yield (%)"].isnull().all():
-    st.error("No yield data available right now. Please try again later.")
-else:
-    # Plot
-    fig = px.line(df, x="Term", y="Yield (%)", markers=True, title="Canadian Yield Curve (ETF Proxy)")
-    fig.update_layout(yaxis_title="Yield (%)", xaxis_title="Term to Maturity")
-    st.plotly_chart(fig, use_container_width=True)
+for label, sid in BOND_SERIES.items():
+    df = fetch_boc_series(sid)
+    latest_val = df.dropna().iloc[-1]
+    yields[label] = latest_val[sid]
+    if latest_date is None:
+        latest_date = latest_val["date"]
 
-    # Show table
-    st.subheader("Yield Data")
-    st.dataframe(df)
+# Create DataFrame for plotting
+df_curve = pd.DataFrame({
+    "Term": list(yields.keys()),
+    "Yield (%)": list(yields.values())
+})
 
+# Display latest date and table
+st.write(f"**Latest Data Date:** {latest_date.date()}")
+st.table(df_curve)
+
+# Plot yield curve
+fig = px.line(
+    df_curve,
+    x="Term",
+    y="Yield (%)",
+    markers=True,
+    title="Canadian Government Bond Yield Curve"
+)
+st.plotly_chart(fig, use_container_width=True)
