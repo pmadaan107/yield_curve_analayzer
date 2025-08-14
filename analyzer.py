@@ -25,13 +25,7 @@ def fred_client() -> Fred | None:
 fred = fred_client()
 
 
-# ====== 1. Yield Curve Example (US) ======
-ten_year = fred.get_series('DGS10')  # 10-year Treasury
-two_year = fred.get_series('DGS2')   # 2-year Treasury
-yield_curve_df = pd.DataFrame({'10Y': ten_year, '2Y': two_year})
-yield_curve_df['Spread'] = yield_curve_df['10Y'] - yield_curve_df['2Y']
 
-# ====== 2. FX Example ======
 fx_data = yf.download('CADUSD=X', period='1y', interval='1d')['Close']
 
 # ====== 3. Plot Yield Curve Spread ======
