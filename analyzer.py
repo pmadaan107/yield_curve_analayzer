@@ -33,6 +33,9 @@ BOND_SERIES: Dict[str, str] = {
     "5Y":  "BD.CDN.5YR.DQ.YLD",
     "7Y":  "BD.CDN.7YR.DQ.YLD",
     "10Y": "BD.CDN.10YR.DQ.YLD",
+    "15Y": "BD.CDN.15YR.DQ.YLD",
+    "20Y": "BD.CDN.20YR.DQ.YLD",
+    "25Y": "BD.CDN.25YR.DQ.YLD",
     "30Y": "BD.CDN.LONG.DQ.YLD",
 }
 
