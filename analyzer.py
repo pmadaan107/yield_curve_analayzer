@@ -23,9 +23,16 @@ TICKERS = {
 def fetch_yields():
     data = {}
     for label, ticker in TICKERS.items():
-        df = yf.download(ticker, period="6mo", interval="1d")['Close']
-        data[label] = df
+        df = yf.download(ticker, period="6mo", interval="1d")
+        if not df.empty:
+            data[label] = df['Close']
+        else:
+            st.warning(f"No data for ticker: {ticker}")
+    if not data:
+        st.error("No yield data found. Please check tickers.")
+        return pd.DataFrame()  # return empty safely
     return pd.DataFrame(data)
+
 
 df = fetch_yields().dropna(how="all")
 
