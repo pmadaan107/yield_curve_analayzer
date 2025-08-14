@@ -19,7 +19,7 @@ US_TREASURY_TICKERS = {
 def fetch_yields():
     """Fetch latest yields from Yahoo Finance."""
     data = {}
-    for maturity, ticker in CANADA_BOND_TICKERS.items():
+    for maturity, ticker in US_TREASURY_TICKERS.items():
         try:
             df = yf.download(ticker, period="1mo", interval="1d")
             if not df.empty:
